@@ -1,0 +1,111 @@
+menu "AX.25 AGWPE Server Example"
+
+    config AGWPE_EXAMPLE_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network to connect to as a station.
+            Leave empty to skip station mode and start in AP mode.
+
+    config AGWPE_EXAMPLE_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Optional password for WiFi station mode.
+
+    config AGWPE_EXAMPLE_WIFI_AP_SSID
+        string "Fallback AP SSID"
+        default "ESP-AX25"
+        help
+            SSID used when station mode is skipped or cannot connect.
+
+    config AGWPE_EXAMPLE_WIFI_AP_PASSWORD
+        string "Fallback AP Password"
+        default ""
+        help
+            Optional password for fallback AP mode.
+            Leave empty to create an open access point.
+
+    config AGWPE_EXAMPLE_TCP_PORT
+        int "AGWPE TCP server port"
+        default 8000
+        range 1 65535
+        help
+            TCP port on which the AGWPE server listens for clients.
+
+    config AGWPE_EXAMPLE_UART_NUM
+        int "UART port number"
+        default 1
+        range 0 2
+        help
+            ESP32 UART peripheral number used for the KISS TNC connection.
+
+    choice AGWPE_EXAMPLE_UART_BAUD_RATE_CHOICE
+        prompt "UART baud rate"
+        default AGWPE_EXAMPLE_UART_BAUD_RATE_57600
+        help
+            Select a supported UART baud rate for the KISS TNC link.
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_1200
+            bool "1200"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_2400
+            bool "2400"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_4800
+            bool "4800"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_9600
+            bool "9600"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_19200
+            bool "19200"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_38400
+            bool "38400"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_57600
+            bool "57600"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_115200
+            bool "115200"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_230400
+            bool "230400"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_460800
+            bool "460800"
+
+        config AGWPE_EXAMPLE_UART_BAUD_RATE_921600
+            bool "921600"
+    endchoice
+
+    config AGWPE_EXAMPLE_UART_BAUD_RATE
+        int
+        default 1200 if AGWPE_EXAMPLE_UART_BAUD_RATE_1200
+        default 2400 if AGWPE_EXAMPLE_UART_BAUD_RATE_2400
+        default 4800 if AGWPE_EXAMPLE_UART_BAUD_RATE_4800
+        default 9600 if AGWPE_EXAMPLE_UART_BAUD_RATE_9600
+        default 19200 if AGWPE_EXAMPLE_UART_BAUD_RATE_19200
+        default 38400 if AGWPE_EXAMPLE_UART_BAUD_RATE_38400
+        default 57600 if AGWPE_EXAMPLE_UART_BAUD_RATE_57600
+        default 115200 if AGWPE_EXAMPLE_UART_BAUD_RATE_115200
+        default 230400 if AGWPE_EXAMPLE_UART_BAUD_RATE_230400
+        default 460800 if AGWPE_EXAMPLE_UART_BAUD_RATE_460800
+        default 921600 if AGWPE_EXAMPLE_UART_BAUD_RATE_921600
+
+    config AGWPE_EXAMPLE_UART_TX_PIN
+        int "UART TX GPIO pin"
+        default 6
+        range 0 48
+        help
+            GPIO pin wired to the TNC RXD line (ESP32 transmit).
+
+    config AGWPE_EXAMPLE_UART_RX_PIN
+        int "UART RX GPIO pin"
+        default 7
+        range 0 48
+        help
+            GPIO pin wired to the TNC TXD line (ESP32 receive).
+
+endmenu

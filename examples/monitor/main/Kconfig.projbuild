@@ -1,0 +1,43 @@
+menu "AX.25 Monitor Configuration"
+
+    config MONITOR_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network to connect to as a station.
+            Leave empty to skip station mode and start in AP mode.
+
+    config MONITOR_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Optional password for WiFi station mode.
+
+    config MONITOR_WIFI_AP_SSID
+        string "Fallback AP SSID"
+        default "ESP-AX25"
+        help
+            SSID used when station mode is skipped or cannot connect.
+
+    config MONITOR_WIFI_AP_PASSWORD
+        string "Fallback AP Password"
+        default ""
+        help
+            Optional password for fallback AP mode.
+            Leave empty to create an open access point.
+
+    config MONITOR_SOUNDMODEM_HOST
+        string "Soundmodem Host"
+        default "192.168.1.100"
+        help
+            IP address or hostname of the KISS soundmodem or Direwolf server.
+
+    config MONITOR_SOUNDMODEM_PORT
+        int "Soundmodem KISS TCP Port"
+        default 8100
+        range 1 65535
+        help
+            TCP port on which the soundmodem is listening for KISS connections.
+            Direwolf default is 8001.
+
+endmenu

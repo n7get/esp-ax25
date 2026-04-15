@@ -1,0 +1,103 @@
+menu "UI Beacon Configuration"
+
+    config UI_BEACON_LOCAL_CALLSIGN
+        string "Local Callsign"
+        default "N0CALL-1"
+        help
+            AX.25 callsign and SSID for this station (e.g. N0CALL-1).
+
+    config UI_BEACON_DEST
+        string "Beacon Destination"
+        default "APX100"
+        help
+            AX.25 destination address for the beacon frame (e.g. APRS-0, BEACON-0).
+
+    config UI_BEACON_MESSAGE
+        string "Beacon Message"
+        default "ESP32 AX.25 Beacon"
+        help
+            Text payload included in every beacon UI frame.
+
+    config UI_BEACON_INTERVAL_MS
+        int "Beacon Interval (ms)"
+        default 60000
+        range 1000 3600000
+        help
+            How often to transmit a beacon, in milliseconds.
+
+    config UI_BEACON_UART_NUM
+        int "TNC UART Port Number"
+        default 1
+        range 0 2
+        help
+            UART peripheral number connected to the TNC (0, 1, or 2).
+
+    config UI_BEACON_TNC_TX_PIN
+        int "TNC UART TX GPIO"
+        default 6
+        range 0 48
+        help
+            GPIO number for the UART TX line to the TNC.
+
+    config UI_BEACON_TNC_RX_PIN
+        int "TNC UART RX GPIO"
+        default 7
+        range 0 48
+        help
+            GPIO number for the UART RX line from the TNC.
+
+    choice UI_BEACON_TNC_BAUD_CHOICE
+        prompt "TNC UART Baud Rate"
+        default UI_BEACON_TNC_BAUD_57600
+        help
+            Select a supported UART baud rate for the TNC connection.
+
+        config UI_BEACON_TNC_BAUD_1200
+            bool "1200"
+
+        config UI_BEACON_TNC_BAUD_2400
+            bool "2400"
+
+        config UI_BEACON_TNC_BAUD_4800
+            bool "4800"
+
+        config UI_BEACON_TNC_BAUD_9600
+            bool "9600"
+
+        config UI_BEACON_TNC_BAUD_19200
+            bool "19200"
+
+        config UI_BEACON_TNC_BAUD_38400
+            bool "38400"
+
+        config UI_BEACON_TNC_BAUD_57600
+            bool "57600"
+
+        config UI_BEACON_TNC_BAUD_115200
+            bool "115200"
+
+        config UI_BEACON_TNC_BAUD_230400
+            bool "230400"
+
+        config UI_BEACON_TNC_BAUD_460800
+            bool "460800"
+
+        config UI_BEACON_TNC_BAUD_921600
+            bool "921600"
+    endchoice
+
+    config UI_BEACON_TNC_BAUD
+        int
+        default 1200 if UI_BEACON_TNC_BAUD_1200
+        default 2400 if UI_BEACON_TNC_BAUD_2400
+        default 4800 if UI_BEACON_TNC_BAUD_4800
+        default 9600 if UI_BEACON_TNC_BAUD_9600
+        default 19200 if UI_BEACON_TNC_BAUD_19200
+        default 38400 if UI_BEACON_TNC_BAUD_38400
+        default 57600 if UI_BEACON_TNC_BAUD_57600
+        default 115200 if UI_BEACON_TNC_BAUD_115200
+        default 230400 if UI_BEACON_TNC_BAUD_230400
+        default 460800 if UI_BEACON_TNC_BAUD_460800
+        default 921600 if UI_BEACON_TNC_BAUD_921600
+
+endmenu

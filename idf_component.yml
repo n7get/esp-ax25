@@ -1,0 +1,14 @@
+version: "1.0.0"
+description: "AX.25 protocol stack for ESP-IDF"
+url: "https://github.com/example/esp-ax25"
+license: "MIT"
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c3
+  - esp32c6
+  - esp32h2
+dependencies:
+  idf:
+    version: ">=5.0.0"

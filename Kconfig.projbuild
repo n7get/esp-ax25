@@ -1,0 +1,324 @@
+menu "ESP-AX25 Configuration"
+
+    menu "AGWPE Server"
+        config AX25_AGWPE_SERVER_TX_QUEUE_DEPTH
+            int "TX queue depth (AGWPE frames)"
+            default 16
+            range 4 64
+            help
+                Number of outgoing AGWPE frames that can be queued for
+                transmission to the TCP client before new frames are dropped.
+
+        config AX25_AGWPE_SERVER_TASK_STACK_SIZE
+            int "TX task stack size (bytes)"
+            default 4096
+            range 2048 16384
+            help
+                Stack size for the AGWPE server TX sender task.
+
+        config AX25_AGWPE_SERVER_TASK_PRIORITY
+            int "TX task priority"
+            default 5
+            range 1 24
+            help
+                FreeRTOS priority for the AGWPE server TX sender task.
+
+        config AX25_AGWPE_SERVER_MONITOR_POOL_SIZE
+            int "Monitor output buffer pool size"
+            default 4
+            range 2 16
+            help
+                Number of pre-allocated monitor output buffers used for
+                building AGWPE 'U'/'I'/'S' and raw 'K' frames.  Increase
+                if monitor frames are being dropped under heavy traffic.
+
+    endmenu
+
+    menu "AX.25 Router"
+        config AX25_ROUTER_MAX_PORTS
+            int "Default max router ports"
+            default 16
+            range 2 32
+            help
+                Default runtime value for ax25.router.max_ports when the
+                application does not override it through ax25_config.
+
+        config AX25_ROUTER_PORT_TASK_STACK_SIZE
+            int "Per-port task stack size (bytes)"
+            default 6144
+            range 2048 16384
+            help
+                Stack size for each router port dispatch task.
+
+        config AX25_ROUTER_PORT_TASK_PRIORITY
+            int "Per-port task priority"
+            default 5
+            range 1 24
+            help
+                FreeRTOS priority for router port dispatch tasks.
+
+    endmenu
+
+    menu "AX.25 Buffer Pool"
+        config AX25_BUFFER_POOL_MAX_SIZE
+            int "Maximum buffer pool capacity"
+            default 16
+            range 2 64
+            help
+                Compile-time upper bound for the number of buffers in any
+                ax25_buffer_pool_t.  The actual pool size is set at
+                runtime by ax25_buffer_pool_init() but cannot exceed this
+                value.  Each buffer is AX25_BUFFER_SIZE bytes (~330 B).
+    endmenu
+
+    menu "Wi-Fi"
+        config AX25_WIFI_STA_HOSTNAME_DEFAULT
+            string "Default Wi-Fi STA hostname"
+            default "esp-ax25"
+            help
+                Default runtime value for wifi.sta.hostname when the
+                application does not override it through ax25_config.
+                This hostname is applied to the station netif before the
+                DHCP-based connection attempt starts.
+    endmenu
+
+    menu "AX.25 Connection (ax25_conn)"
+        config AX25_CONN_T1_MS
+            int "T1 acknowledgement timeout (ms)"
+            default 10000
+            range 500 60000
+            help
+                T1 is the acknowledgement timer. It starts when an I-frame or
+                certain control frames are sent, and stops when the expected
+                response is received. If T1 expires, the frame is retransmitted.
+                Default is 10000 ms to match Linux kernel AX.25 behavior.
+
+        config AX25_CONN_T2_MS
+            int "T2 response delay timeout (ms)"
+            default 1000
+            range 100 30000
+            help
+                T2 is the response delay timer. It allows a receiving station
+                to delay sending an acknowledgement, hoping to piggyback it on
+                outgoing data.
+
+        config AX25_CONN_T3_MS
+            int "T3 inactive link timeout (ms)"
+            default 180000
+            range 10000 600000
+            help
+                T3 is the inactive link timer. If no frames are exchanged within
+                this time, the station polls the remote to verify the link.
+
+        config AX25_CONN_N2_RETRIES
+            int "N2 maximum retry count"
+            default 10
+            range 1 50
+            help
+                Maximum number of times a frame will be retransmitted before
+                the link is considered failed.
+
+        config AX25_CONN_WINDOW_SIZE
+            int "Window size (k)"
+            default 4
+            range 1 7
+            help
+                Maximum number of outstanding (unacknowledged) I-frames.
+                AX.25 v2.0 allows 1-7.
+
+        config AX25_CONN_BUFFER_POOL_SIZE
+            int "Buffer pool size"
+            default 16
+            range 4 64
+            help
+                Number of buffers in the internal buffer pool for frame
+                construction and transmission.
+    endmenu
+
+    config AX25_PHY_UART_WRITE_RETRIES
+        int "AX.25 PHY UART write retries"
+        default 3
+        range 0 20
+        help
+            Number of retry attempts for UART writes in ax25_phy_kiss_uart_send()
+            when a write fails or returns no bytes.
+
+    config AX25_PHY_UART_WRITE_BACKOFF_MS
+        int "AX.25 PHY UART write retry backoff (ms)"
+        default 10
+        range 0 1000
+        help
+            Delay in milliseconds between UART write retries in
+            ax25_phy_kiss_uart_send().
+
+    config AX25_PHY_TCP_SERVER_ACCEPT_TASK_STACK_SIZE
+        int "TCP server accept task stack size (bytes)"
+        default 3072
+        range 2048 16384
+        help
+            Default stack size for the shared ax25_phy_tcp_server accept task
+            (tcp_srv_accept) when a caller does not explicitly provide one.
+
+    config AX25_PHY_TCP_SERVER_CONN_TASK_STACK_SIZE
+        int "TCP server connection task stack size (bytes)"
+        default 6144
+        range 3072 32768
+        help
+            Default stack size for each shared ax25_phy_tcp_server per-client
+            connection task (tcp_srv_X) when a caller does not explicitly
+            provide one. Increase if stack overflow is reported in tcp_srv_X.
+
+    menu "AX.25 PHY Bluetooth Classic SPP"
+        depends on BT_ENABLED
+
+        config AX25_PHY_BT_DEVICE_NAME
+            string "Bluetooth device name"
+            default "ESP-AX25 KISS TNC"
+            help
+                The Bluetooth device name that will be visible during
+                discovery and pairing. Maximum 32 characters.
+
+        config AX25_PHY_BT_BUTTON_GPIO
+            int "Pairing button GPIO pin"
+            default 7
+            range 0 48
+            help
+                GPIO pin number for the pairing button. Hold the button
+                for 5 seconds to enter Bluetooth discoverable/pairing mode.
+                The button is expected to be active-low (pressed = low).
+
+        config AX25_PHY_BT_LED_GPIO
+            int "Status LED GPIO pin"
+            default 3
+            range 0 48
+            help
+                GPIO pin number for the status LED.
+                - Blinks 1 second on/off when in pairing mode
+                - Solid on when a Bluetooth SPP connection is established
+                - Off when idle (not in pairing mode and no connection)
+
+        config AX25_PHY_BT_REQUIRE_PIN
+            bool "Require PIN for Bluetooth pairing"
+            default n
+            help
+                If enabled, Bluetooth pairing will require a PIN code.
+                If disabled, the device uses open connection mode (no PIN).
+
+        config AX25_PHY_BT_PIN_CODE
+            string "Bluetooth pairing PIN code"
+            default "1234"
+            depends on AX25_PHY_BT_REQUIRE_PIN
+            help
+                The PIN code required for Bluetooth pairing when PIN
+                authentication is enabled. Maximum 16 characters.
+
+        config AX25_PHY_BT_WRITE_RETRIES
+            int "AX.25 PHY Bluetooth write retries"
+            default 3
+            range 0 20
+            help
+                Number of retry attempts for SPP writes in ax25_phy_kiss_bt_send()
+                when a write fails.
+
+        config AX25_PHY_BT_WRITE_BACKOFF_MS
+            int "AX.25 PHY Bluetooth write retry backoff (ms)"
+            default 10
+            range 0 1000
+            help
+                Delay in milliseconds between SPP write retries in
+                ax25_phy_kiss_bt_send().
+
+    endmenu
+
+    menu "Extra Logging"
+        comment "AGWPE"
+
+        config AX25_AGWPE_LOG_FRAMES
+            bool "Enable AGWPE frame pretty-print logging"
+            default n
+            help
+                Enable detailed pretty-print logging of every AGWPE frame at
+                the server RX (from TCP client) and TX (to TCP client)
+                boundaries.  Each frame logs kind, port, callsigns, PID,
+                data length, and a hex/ASCII dump under the "AGWPE_PRINT" tag
+                at INFO level.  Disable to reduce log verbosity and code size.
+
+        config AX25_AGWPE_LOG_ROUTER_FRAMES
+            bool "Enable AGWPE/router AX.25 boundary pretty-print logging"
+            default n
+            help
+                Enable AX.25 pretty-print logging for frames crossing the
+                AGWPE/router boundary in ax25_agwpe_server.c.
+                This logs:
+                - frames received from the router into AGWPE callbacks
+                - frames sent from AGWPE into ax25_router_send()
+                using ax25_print_frame() under the AX25_PRINT tag.
+                Disable to reduce log verbosity and CPU usage.
+
+        comment "Router"
+
+        config AX25_ROUTER_LOG_FRAMES
+            bool "Enable AX.25 router frame flow logging"
+            default n
+            help
+                Enable INFO-level logging in ax25_router for port registration,
+                port removal, and frame routing decisions. When enabled, the
+                router logs the source port mode, destination callsign, whether
+                an addressed port matched, and which ports each frame is queued
+                to. This is intended for tracing end-to-end AX.25 flow through
+                the router during debugging.
+
+        config AX25_ROUTER_LOG_PORT_STATUS
+            bool "Enable AX.25 router port status diagnostics"
+            default n
+            help
+                Enable INFO/WARN-level logging in ax25_router for port lifecycle
+                and status transitions. When enabled, the router logs port
+                registration/removal requests, slot assignment, dynamic-port
+                binding events, teardown retirement, and detailed slot inventory
+                dumps when registration or removal fails. Enable this when
+                debugging port exhaustion or stale router slots.
+
+        comment "Connection"
+
+        config AX25_CONN_LOG_FRAMES
+            bool "Enable AX.25 connection pretty-print frame logging"
+            default n
+            help
+                Enable extra frame-level logging in ax25_conn.c using
+                ax25_print_frame() for both RX and TX paths.
+
+        config AX25_CONN_LOG_DROPPED_FRAMES
+            bool "Enable AX.25 connection dropped-frame logging"
+            default n
+            help
+                Log when ax25_conn ignores or drops inbound or queued frames,
+                including the reason, connection state, and a pretty-printed
+                frame summary.
+
+        comment "PHY"
+
+        config AX25_PHY_UART_LOG_FRAMES
+            bool "Enable AX.25 PHY UART extra frame logging"
+            default n
+            help
+                Enable extra frame-level logging in ax25_phy_kiss_uart.c using
+                ax25_print_frame() for both RX and TX paths.
+
+        config AX25_PHY_TCP_LOG_FRAMES
+            bool "Enable AX.25 PHY TCP extra frame logging"
+            default n
+            help
+                Enable extra frame-level logging in ax25_phy_kiss_tcp_client.c using
+                ax25_print_frame() for both RX and TX paths.
+
+        config AX25_PHY_BT_LOG_FRAMES
+            bool "Enable AX.25 PHY Bluetooth extra frame logging"
+            depends on BT_ENABLED
+            default n
+            help
+                Enable extra frame-level logging in ax25_phy_kiss_bt.c using
+                ax25_print_frame() for both RX and TX paths.
+    endmenu
+
+endmenu

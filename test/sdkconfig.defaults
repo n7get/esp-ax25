@@ -1,0 +1,14 @@
+# Increase main task stack: ax25_conn_t is ~2200 bytes and is allocated as a
+# local variable in each test function, so the default 3584-byte stack overflows.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Test image now exceeds the default 1MB factory slot; use the larger
+# single-app partition profile for headroom during debug/test builds.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# AGWPE and connection callbacks can execute in router port tasks and use
+# moderate stack; keep this aligned with library default to avoid stack faults.
+CONFIG_AX25_ROUTER_PORT_TASK_STACK_SIZE=4096
+
+# Enable external PSRAM on the ESP32-S3 test target.
+CONFIG_SPIRAM=y

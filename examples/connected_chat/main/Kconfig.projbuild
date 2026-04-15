@@ -1,0 +1,84 @@
+menu "Connected Chat Configuration"
+
+    config CONNECTED_CHAT_LOCAL_CALLSIGN
+        string "Local Callsign"
+        default "N0CALL-1"
+        help
+            AX.25 callsign and SSID for this station (e.g. N0CALL-1).
+
+    config CONNECTED_CHAT_UART_NUM
+        int "TNC UART Port Number"
+        default 1
+        range 0 2
+        help
+            UART peripheral number connected to the TNC (0, 1, or 2).
+
+    config CONNECTED_CHAT_TNC_TX_PIN
+        int "TNC UART TX GPIO"
+        default 6
+        range 0 48
+        help
+            GPIO number for the UART TX line to the TNC.
+
+    config CONNECTED_CHAT_TNC_RX_PIN
+        int "TNC UART RX GPIO"
+        default 7
+        range 0 48
+        help
+            GPIO number for the UART RX line from the TNC.
+
+    choice CONNECTED_CHAT_TNC_BAUD_CHOICE
+        prompt "TNC UART Baud Rate"
+        default CONNECTED_CHAT_TNC_BAUD_57600
+        help
+            Select a supported UART baud rate for the TNC connection.
+
+        config CONNECTED_CHAT_TNC_BAUD_1200
+            bool "1200"
+
+        config CONNECTED_CHAT_TNC_BAUD_2400
+            bool "2400"
+
+        config CONNECTED_CHAT_TNC_BAUD_4800
+            bool "4800"
+
+        config CONNECTED_CHAT_TNC_BAUD_9600
+            bool "9600"
+
+        config CONNECTED_CHAT_TNC_BAUD_19200
+            bool "19200"
+
+        config CONNECTED_CHAT_TNC_BAUD_38400
+            bool "38400"
+
+        config CONNECTED_CHAT_TNC_BAUD_57600
+            bool "57600"
+
+        config CONNECTED_CHAT_TNC_BAUD_115200
+            bool "115200"
+
+        config CONNECTED_CHAT_TNC_BAUD_230400
+            bool "230400"
+
+        config CONNECTED_CHAT_TNC_BAUD_460800
+            bool "460800"
+
+        config CONNECTED_CHAT_TNC_BAUD_921600
+            bool "921600"
+    endchoice
+
+    config CONNECTED_CHAT_TNC_BAUD
+        int
+        default 1200 if CONNECTED_CHAT_TNC_BAUD_1200
+        default 2400 if CONNECTED_CHAT_TNC_BAUD_2400
+        default 4800 if CONNECTED_CHAT_TNC_BAUD_4800
+        default 9600 if CONNECTED_CHAT_TNC_BAUD_9600
+        default 19200 if CONNECTED_CHAT_TNC_BAUD_19200
+        default 38400 if CONNECTED_CHAT_TNC_BAUD_38400
+        default 57600 if CONNECTED_CHAT_TNC_BAUD_57600
+        default 115200 if CONNECTED_CHAT_TNC_BAUD_115200
+        default 230400 if CONNECTED_CHAT_TNC_BAUD_230400
+        default 460800 if CONNECTED_CHAT_TNC_BAUD_460800
+        default 921600 if CONNECTED_CHAT_TNC_BAUD_921600
+
+endmenu

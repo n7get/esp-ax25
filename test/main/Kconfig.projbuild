@@ -1,0 +1,4 @@
+menu "AX.25 Test Configuration"
+    comment "Stress tests were moved to the dedicated test_stress suite."
+
+endmenu

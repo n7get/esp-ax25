@@ -1,0 +1,137 @@
+menu "AX.25 Router Configuration"
+
+    config ROUTER_WIFI_ENABLE
+        bool "Enable WiFi and TCP KISS server"
+        default y
+        help
+            Connect to a WiFi network and start a TCP KISS server so that
+            applications such as Direwolf, pat, and other KISS-over-TCP
+            clients can reach the router over the network.  When disabled,
+            all WiFi and TCP code is excluded from the build.
+
+    config ROUTER_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        depends on ROUTER_WIFI_ENABLE
+        help
+            SSID of the WiFi network to connect to as a station.
+            Leave empty to skip station mode and start in AP mode.
+
+    config ROUTER_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        depends on ROUTER_WIFI_ENABLE
+        help
+            Optional password for WiFi station mode.
+
+    config ROUTER_WIFI_AP_SSID
+        string "Fallback AP SSID"
+        default "ESP-AX25"
+        depends on ROUTER_WIFI_ENABLE
+        help
+            SSID used when station mode is skipped or cannot connect.
+
+    config ROUTER_WIFI_AP_PASSWORD
+        string "Fallback AP Password"
+        default ""
+        depends on ROUTER_WIFI_ENABLE
+        help
+            Optional password for fallback AP mode.
+            Leave empty to create an open access point.
+
+    config ROUTER_TCP_PORT
+        int "TCP KISS server port"
+        default 8100
+        range 1 65535
+        depends on ROUTER_WIFI_ENABLE
+        help
+            TCP port on which the KISS server listens for incoming clients
+            (e.g. Direwolf, pat, or other KISS-over-TCP applications).
+
+    config ROUTER_UART_NUM
+        int "UART port number"
+        default 1
+        range 0 2
+        help
+            ESP32 UART peripheral number used for the KISS TNC connection
+            (0 = UART0, 1 = UART1, 2 = UART2).
+
+    choice ROUTER_UART_BAUD_RATE_CHOICE
+        prompt "UART baud rate"
+        default ROUTER_UART_BAUD_RATE_57600
+        help
+            Select a supported UART baud rate for the KISS TNC link.
+
+        config ROUTER_UART_BAUD_RATE_1200
+            bool "1200"
+
+        config ROUTER_UART_BAUD_RATE_2400
+            bool "2400"
+
+        config ROUTER_UART_BAUD_RATE_4800
+            bool "4800"
+
+        config ROUTER_UART_BAUD_RATE_9600
+            bool "9600"
+
+        config ROUTER_UART_BAUD_RATE_19200
+            bool "19200"
+
+        config ROUTER_UART_BAUD_RATE_38400
+            bool "38400"
+
+        config ROUTER_UART_BAUD_RATE_57600
+            bool "57600"
+
+        config ROUTER_UART_BAUD_RATE_115200
+            bool "115200"
+
+        config ROUTER_UART_BAUD_RATE_230400
+            bool "230400"
+
+        config ROUTER_UART_BAUD_RATE_460800
+            bool "460800"
+
+        config ROUTER_UART_BAUD_RATE_921600
+            bool "921600"
+    endchoice
+
+    config ROUTER_UART_BAUD_RATE
+        int
+        default 1200 if ROUTER_UART_BAUD_RATE_1200
+        default 2400 if ROUTER_UART_BAUD_RATE_2400
+        default 4800 if ROUTER_UART_BAUD_RATE_4800
+        default 9600 if ROUTER_UART_BAUD_RATE_9600
+        default 19200 if ROUTER_UART_BAUD_RATE_19200
+        default 38400 if ROUTER_UART_BAUD_RATE_38400
+        default 57600 if ROUTER_UART_BAUD_RATE_57600
+        default 115200 if ROUTER_UART_BAUD_RATE_115200
+        default 230400 if ROUTER_UART_BAUD_RATE_230400
+        default 460800 if ROUTER_UART_BAUD_RATE_460800
+        default 921600 if ROUTER_UART_BAUD_RATE_921600
+
+    config ROUTER_UART_TX_PIN
+        int "UART TX GPIO pin"
+        default 6
+        range 0 48
+        help
+            GPIO pin wired to the TNC's RXD line (ESP32 transmit).
+
+    config ROUTER_UART_RX_PIN
+        int "UART RX GPIO pin"
+        default 7
+        range 0 48
+        help
+            GPIO pin wired to the TNC's TXD line (ESP32 receive).
+
+    config ROUTER_BT_ENABLE
+        bool "Enable Bluetooth SPP KISS client support"
+        default y
+        depends on BT_ENABLED
+        help
+            When enabled, the router accepts a Bluetooth Classic SPP connection
+            as a dynamic router port alongside TCP KISS clients.  Hold the
+            pairing button (see AX25_PHY_BT_BUTTON_GPIO) for 5 seconds to make
+            the device discoverable.
+
+endmenu

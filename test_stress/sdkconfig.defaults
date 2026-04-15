@@ -1,0 +1,11 @@
+# Keep stress test enabled in dedicated stress suite.
+CONFIG_STRESS_TEST_ENABLE=y
+
+# AGWPE tests use one promiscuous router port plus per-connection ports.
+CONFIG_AX25_ROUTER_MAX_PORTS=16
+
+# Increase main task stack to avoid large on-stack local overflows in tests.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Router callbacks may execute in router port tasks; keep a safe stack size.
+CONFIG_AX25_ROUTER_PORT_TASK_STACK_SIZE=4096

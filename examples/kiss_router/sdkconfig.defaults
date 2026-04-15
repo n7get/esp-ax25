@@ -1,0 +1,24 @@
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y
+
+# DOUT (single-data-out) flash mode is used instead of DIO so that the ESP32
+# ROM can recover the boya flash chip after a soft reset (TG1WDT_SYS_RESET).
+# DIO mode requires the chip to be in a special register state that the ROM
+# cannot reliably restore on boya chips after a soft reset, causing
+# "invalid header: 0xffffffff" boot loops.  DOUT requires no special mode
+# entry and works correctly after every soft reset.
+CONFIG_ESPTOOLPY_FLASHMODE_DOUT=y
+
+# CONFIG_BTDM_CTRL_HLI=y gives the BT controller a level-4 hardware interrupt
+# backed by TG1.  During esp_bt_controller_init() the BT ROM code configures TG1
+# and briefly disables all normal FreeRTOS-level interrupts.  This prevents the
+# idle task from being scheduled, which triggers TG0WDT_SYS_RESET (task watchdog,
+# stage 2) roughly 10 seconds after boot before the router ever starts.  With HLI
+# disabled the BT controller uses a normal level-3 interrupt and does not touch
+# the TG timers at all during init.
+CONFIG_BTDM_CTRL_HLI=n
+
+# CONFIG_ESP_INT_WDT uses TG1 as its watchdog timer.  When BTDM_CTRL_HLI is
+# enabled, both compete for TG1 and TG1WDT_SYS_RESET fires.  With HLI now
+# disabled this conflict no longer exists, but keeping INT_WDT off avoids any
+# future regression if HLI is accidentally re-enabled.
+CONFIG_ESP_INT_WDT=n

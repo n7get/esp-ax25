@@ -1,0 +1,43 @@
+menu "AX.25 Stress Test Configuration"
+
+    config STRESS_TEST_ENABLE
+        bool "Enable stress test"
+        default y
+        help
+            Include the AX.25 stress test in this dedicated stress suite.
+
+    if STRESS_TEST_ENABLE
+
+    config STRESS_TOTAL_CONNECTIONS
+        int "Total number of connections to run"
+        default 500
+        range 1 100000
+        help
+            Total number of AX.25 connected sessions to complete before the
+            test finishes. Each session connects, exchanges a random payload,
+            verifies the echo, and disconnects cleanly.
+
+    config STRESS_SIMULTANEOUS_CONNECTIONS
+        int "Number of simultaneous connections"
+        default 6
+        range 1 8
+        help
+            Number of AX.25 sessions to run in parallel.
+
+    config STRESS_MIN_DATA_SIZE
+        int "Minimum payload size per connection (bytes)"
+        default 128
+        range 1 256
+        help
+            Smallest random payload size sent over a connected session.
+
+    config STRESS_MAX_DATA_SIZE
+        int "Maximum payload size per connection (bytes)"
+        default 5120
+        range 1 65536
+        help
+            Largest random payload size sent over a connected session.
+
+    endif # STRESS_TEST_ENABLE
+
+endmenu
