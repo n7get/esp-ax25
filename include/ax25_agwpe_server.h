@@ -348,6 +348,23 @@ esp_err_t ax25_agwpe_server_agwpe_in(ax25_agwpe_server_t *server,
 esp_err_t ax25_agwpe_server_ax25_in(ax25_agwpe_server_t *server,
                                      const ax25_frame_t *frame);
 
+/**
+ * @brief Notify the server that the local station just transmitted an AX.25 frame.
+ *
+ * If monitor mode is enabled and the frame is a UI frame, a 'T' (own-transmitted)
+ * AGWPE monitor frame is enqueued for the client.  This mirrors the direwolf
+ * behaviour of emitting 'T' frames for locally-generated UI traffic.
+ *
+ * Thread-safe; may be called from any task.
+ *
+ * @param server  Server handle.
+ * @param frame   The AX.25 frame that was just transmitted.
+ * @return ESP_OK on success;
+ *         ESP_ERR_INVALID_ARG if server or frame is NULL.
+ */
+esp_err_t ax25_agwpe_server_ax25_out(ax25_agwpe_server_t *server,
+                                      const ax25_frame_t *frame);
+
 /*******************************************************************************
  * Queries
  ******************************************************************************/
@@ -417,6 +434,16 @@ esp_err_t ax25_agwpe_server_client_agwpe_in(ax25_agwpe_server_t *client,
  */
 esp_err_t ax25_agwpe_server_client_ax25_in(ax25_agwpe_server_t *client,
                                             const ax25_frame_t *frame);
+
+/**
+ * @brief Notify a managed AGWPE client that the local station transmitted a frame.
+ *
+ * Mirrors ax25_agwpe_server_ax25_out() for the singleton-manager client path.
+ * If monitor mode is enabled and the frame is a UI frame, a 'T' monitor frame
+ * is enqueued for the client.
+ */
+esp_err_t ax25_agwpe_server_client_ax25_out(ax25_agwpe_server_t *client,
+                                             const ax25_frame_t *frame);
 
 /**
  * @brief Get router source port marker for a managed AGWPE client.

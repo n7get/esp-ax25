@@ -137,14 +137,19 @@ void agwpe_decoder_process_byte(agwpe_decoder_t *decoder, uint8_t byte)
             if (decoder->bytes_received >= AGWPE_HEADER_SIZE) {
                 /* Header complete - decode data_len (little-endian at offset 28) */
                 uint32_t data_len = read_le32(&frame_bytes[28]);
-                
-                /* Clamp data length to maximum */
+
+                /* Track the full wire length for correct byte consumption.
+                 * If data_len exceeds our buffer we still need to drain the
+                 * exact wire count, otherwise the TCP stream goes out of sync. */
+                decoder->data_len_wire = data_len;
+
+                /* Clamp stored data length to buffer maximum */
                 if (data_len > AGWPE_MAX_DATA_LEN) {
                     data_len = AGWPE_MAX_DATA_LEN;
                 }
                 decoder->frame.header.data_len = data_len;
                 
-                if (data_len > 0) {
+                if (decoder->data_len_wire > 0) {
                     decoder->state = AGWPE_STATE_DATA;
                     decoder->bytes_received = 0;
                 } else {
@@ -163,7 +168,9 @@ void agwpe_decoder_process_byte(agwpe_decoder_t *decoder, uint8_t byte)
             }
             decoder->bytes_received++;
             
-            if (decoder->bytes_received >= decoder->frame.header.data_len) {
+            /* Exit DATA state after consuming the full wire byte count, not
+             * the clamped stored length, to keep the stream in sync. */
+            if (decoder->bytes_received >= decoder->data_len_wire) {
                 /* Frame complete */
                 if (decoder->callback) {
                     decoder->callback(&decoder->frame, decoder->user_data);
@@ -298,9 +305,9 @@ esp_err_t ax25_to_agwpe_raw(const ax25_frame_t *ax25_frame,
     ax25_addr_to_agwpe_call(&ax25_frame->source, agwpe_out->header.call_from);
     ax25_addr_to_agwpe_call(&ax25_frame->destination, agwpe_out->header.call_to);
 
-    /* Build the raw AX.25 frame into the data field */
-    /* We need to encode the AX.25 frame manually since we don't have a buffer pool */
+    /* Prepend TNC port byte (direwolf expects this) */
     size_t pos = 0;
+    agwpe_out->data[pos++] = port << 4;
 
     /* Destination address */
     ax25_address_t dest_copy = ax25_frame->destination;
@@ -364,19 +371,22 @@ esp_err_t ax25_to_agwpe_unproto(const ax25_frame_t *ax25_frame,
         /* 'V' frame - unproto via digipeaters */
         agwpe_out->header.data_kind = AGWPE_KIND_SEND_UNPROTO_VIA;
         
-        /* Data format: <num_digis> <digi1>\0 <digi2>\0 ... <payload> */
+        /* Data format: <num_digis> <digi1 10 bytes> <digi2 10 bytes> ... <payload>
+         * Each digipeater uses a fixed 10-byte null-padded slot (direwolf compatible). */
         size_t pos = 0;
         agwpe_out->data[pos++] = ax25_frame->num_digipeaters;
         
         for (uint8_t i = 0; i < ax25_frame->num_digipeaters && i < AX25_MAX_DIGIPEATERS; i++) {
-            char digi_call[AGWPE_CALLSIGN_LEN + 1];
-            ax25_address_to_string(&ax25_frame->digipeaters[i], digi_call, AGWPE_CALLSIGN_LEN);
-            size_t call_len = strlen(digi_call);
-            if (pos + call_len + 1 > AGWPE_MAX_DATA_LEN) {
+            if (pos + AGWPE_CALLSIGN_LEN > AGWPE_MAX_DATA_LEN) {
                 return ESP_ERR_NO_MEM;
             }
-            memcpy(&agwpe_out->data[pos], digi_call, call_len + 1);
-            pos += call_len + 1;
+            char digi_call[AGWPE_CALLSIGN_LEN + 1];
+            ax25_address_to_string(&ax25_frame->digipeaters[i], digi_call, AGWPE_CALLSIGN_LEN);
+            memset(&agwpe_out->data[pos], 0, AGWPE_CALLSIGN_LEN);
+            size_t call_len = strlen(digi_call);
+            if (call_len > AGWPE_CALLSIGN_LEN) call_len = AGWPE_CALLSIGN_LEN;
+            memcpy(&agwpe_out->data[pos], digi_call, call_len);
+            pos += AGWPE_CALLSIGN_LEN;
         }
         
         /* Add payload */
@@ -410,12 +420,15 @@ esp_err_t agwpe_raw_to_ax25(const agwpe_frame_t *agwpe_frame,
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* 'T' frame contains raw AX.25 data */
+    /* 'K' frame contains raw AX.25 data (direwolf/AGWPE) */
     if (agwpe_frame->header.data_kind != AGWPE_KIND_RECV_RAW) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    return ax25_frame_parse(agwpe_frame->data, agwpe_frame->header.data_len, ax25_out);
+    if (agwpe_frame->header.data_len < 2) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    /* Skip TNC port byte */
+    return ax25_frame_parse(agwpe_frame->data + 1, agwpe_frame->header.data_len - 1, ax25_out);
 }
 
 esp_err_t agwpe_monitored_to_ax25(const agwpe_frame_t *agwpe_frame,
@@ -572,20 +585,22 @@ esp_err_t agwpe_build_connect_via_req(uint8_t port,
     agwpe_set_callsign(agwpe_out->header.call_from, from_call);
     agwpe_set_callsign(agwpe_out->header.call_to, to_call);
 
-    /* Data format: <num_digis> <digi1>\0 <digi2>\0 ... */
+    /* Data format: <num_digis> <digi1 10 bytes> <digi2 10 bytes> ...
+     * Each digipeater uses a fixed 10-byte null-padded slot (direwolf compatible). */
     size_t pos = 0;
     agwpe_out->data[pos++] = num_digis;
     
     for (uint8_t i = 0; i < num_digis; i++) {
-        if (digipeaters[i] == NULL) {
-            continue;
-        }
-        size_t call_len = strlen(digipeaters[i]);
-        if (pos + call_len + 1 > AGWPE_MAX_DATA_LEN) {
+        if (pos + AGWPE_CALLSIGN_LEN > AGWPE_MAX_DATA_LEN) {
             return ESP_ERR_NO_MEM;
         }
-        memcpy(&agwpe_out->data[pos], digipeaters[i], call_len + 1);
-        pos += call_len + 1;
+        memset(&agwpe_out->data[pos], 0, AGWPE_CALLSIGN_LEN);
+        if (digipeaters[i] != NULL) {
+            size_t call_len = strlen(digipeaters[i]);
+            if (call_len > AGWPE_CALLSIGN_LEN) call_len = AGWPE_CALLSIGN_LEN;
+            memcpy(&agwpe_out->data[pos], digipeaters[i], call_len);
+        }
+        pos += AGWPE_CALLSIGN_LEN;
     }
     
     agwpe_out->header.data_len = (uint32_t)pos;
@@ -789,13 +804,13 @@ esp_err_t agwpe_parse_version_resp(const agwpe_frame_t *frame,
         return ESP_ERR_INVALID_ARG;
     }
     
-    /* Version response data: 4 bytes - major (2 bytes LE), minor (2 bytes LE) */
-    if (frame->header.data_len < 4) {
+    /* Version response data: 8 bytes - major (4 bytes LE), minor (4 bytes LE) */
+    if (frame->header.data_len < 8) {
         return ESP_ERR_INVALID_SIZE;
     }
     
-    version->major = read_le16(frame->data);
-    version->minor = read_le16(&frame->data[2]);
+    version->major = read_le32(frame->data);
+    version->minor = read_le32(&frame->data[4]);
     
     return ESP_OK;
 }
@@ -967,7 +982,8 @@ bool agwpe_is_monitored(uint8_t kind)
         case AGWPE_KIND_RECV_UNPROTO:
         case AGWPE_KIND_RECV_SUPERVISORY:
         case AGWPE_KIND_RECV_I_FRAME:
-        case AGWPE_KIND_RECV_RAW:
+        case AGWPE_KIND_RECV_RAW:  /* 'K' */
+        case AGWPE_KIND_OWN_TRANSMITTED: /* 'T' (monitor text, not raw) */
             return true;
         default:
             return false;

@@ -220,12 +220,15 @@ static void handle_outstanding_port(ax25_agwpe_server_t *srv,
                                      const agwpe_frame_t *frame);
 static void handle_outstanding_conn(ax25_agwpe_server_t *srv,
                                      const agwpe_frame_t *frame);
+static void handle_heard_stations(ax25_agwpe_server_t *srv,
+                                   const agwpe_frame_t *frame);
 
 /* AX.25 → AGWPE monitoring helpers */
 static void send_raw_to_client(ax25_agwpe_server_t *srv,
                                 const ax25_frame_t *frame);
 static void send_monitor_to_client(ax25_agwpe_server_t *srv,
-                                    const ax25_frame_t *frame);
+                                    const ax25_frame_t *frame,
+                                    bool own_transmitted);
 static void deliver_connected_data(ax25_agwpe_server_t *srv,
                                     agwpe_conn_slot_t *slot,
                                     const uint8_t *data, size_t len);
@@ -644,6 +647,23 @@ esp_err_t ax25_agwpe_server_client_ax25_in(ax25_agwpe_server_t *client,
     return ax25_agwpe_server_ax25_in(client, frame);
 }
 
+esp_err_t ax25_agwpe_server_client_ax25_out(ax25_agwpe_server_t *client,
+                                             const ax25_frame_t *frame)
+{
+    if (!s_manager.initialized || client == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    bool known = manager_has_client_nolock(client);
+    xSemaphoreGive(s_manager.mutex);
+    if (!known) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ax25_agwpe_server_ax25_out(client, frame);
+}
+
 struct ax25_router_port_t *ax25_agwpe_server_get_client_router_port(
     ax25_agwpe_server_t *client)
 {
@@ -761,8 +781,8 @@ esp_err_t ax25_agwpe_server_agwpe_in(ax25_agwpe_server_t *server,
             handle_port_cap_req(server, frame);
             break;
 
-        case 'H':   /* Heard stations — not implemented */
-            ESP_LOGD(TAG, "'H' Heard stations: not implemented");
+        case 'H':   /* Heard stations — send 20 empty frames per spec */
+            handle_heard_stations(server, frame);
             break;
 
         /* ---- Callsign registration ---- */
@@ -857,7 +877,7 @@ esp_err_t ax25_agwpe_server_ax25_in(ax25_agwpe_server_t *server,
 
     /* 2) If monitor mode enabled, send U/I/S monitor frame to client */
     if (server->monitor_enabled) {
-        send_monitor_to_client(server, frame);
+        send_monitor_to_client(server, frame, false);
     }
 
     /* 3) Connected-mode frames are routed through per-connection static
@@ -980,6 +1000,24 @@ struct ax25_router_port_t *ax25_agwpe_server_get_router_port(
         return NULL;
     }
     return (struct ax25_router_port_t *)&server->router_port;
+}
+
+esp_err_t ax25_agwpe_server_ax25_out(ax25_agwpe_server_t *server,
+                                      const ax25_frame_t *frame)
+{
+    if (server == NULL || frame == NULL || !server->initialized) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(server->mutex, portMAX_DELAY);
+
+    /* Only UI frames produce a 'T' own-transmitted monitor frame */
+    if (server->monitor_enabled) {
+        send_monitor_to_client(server, frame, true);
+    }
+
+    xSemaphoreGive(server->mutex);
+    return ESP_OK;
 }
 
 /*******************************************************************************
@@ -1526,11 +1564,46 @@ static void conn_on_error(const ax25_conn_error_t *error, void *user_data)
     if (!resolve_valid_conn_callback_ctx(ctx, &srv, &slot)) {
         return;
     }
-    (void)srv;
-    (void)slot;
+
     ESP_LOGW(TAG, "AX.25 conn error: %s (code=%d, retries=%d)",
              error->message ? error->message : "unknown",
              error->code, error->retry_count);
+
+    /* Notify the AGWPE client with a 'd' frame.  Timeout errors map to
+     * "DISCONNECTED RETRYOUT"; all other errors map to "DISCONNECTED From". */
+    bool is_timeout = (error->code == ESP_ERR_TIMEOUT);
+
+    agwpe_frame_t reply;
+    agwpe_frame_init(&reply);
+    reply.header.port      = slot->port;
+    reply.header.data_kind = 'd';
+
+    char remote_str[AGWPE_CALLSIGN_LEN + 1];
+    char local_str[AGWPE_CALLSIGN_LEN + 1];
+    agwpe_get_callsign(slot->remote_call, remote_str);
+    agwpe_get_callsign(slot->local_call, local_str);
+
+    agwpe_set_callsign(reply.header.call_from, remote_str);
+    agwpe_set_callsign(reply.header.call_to, local_str);
+
+    char info[100];
+    if (is_timeout) {
+        snprintf(info, sizeof(info), "*** DISCONNECTED RETRYOUT With %s\r", remote_str);
+    } else {
+        snprintf(info, sizeof(info), "*** DISCONNECTED From Station %s\r", remote_str);
+    }
+    size_t info_len = strlen(info) + 1;
+    if (info_len > AGWPE_MAX_DATA_LEN) info_len = AGWPE_MAX_DATA_LEN;
+    memcpy(reply.data, info, info_len);
+    reply.header.data_len = (uint32_t)info_len;
+
+    enqueue_agwpe_frame(srv, &reply);
+
+    /* Release the connection slot */
+    xSemaphoreTake(srv->mutex, portMAX_DELAY);
+    ax25_conn_deinit(&slot->conn);
+    free_conn_slot(srv, slot);
+    xSemaphoreGive(srv->mutex);
 }
 
 static bool resolve_valid_conn_callback_ctx(conn_cb_ctx_t *ctx,
@@ -1615,9 +1688,10 @@ static void handle_port_info_req(ax25_agwpe_server_t *srv,
     agwpe_frame_init(&reply);
     reply.header.data_kind = 'G';
 
-    /* Format: "<count>;<PortN description>;" */
+    /* Format: "<count>;Port<N> <description>;" — YAAC uses the "Port<N>" prefix.
+     * Use srv->port + 1 (1-based) so a second server instance says "Port2", etc. */
     char info[200];
-    snprintf(info, sizeof(info), "1;%s;", srv->port_desc);
+    snprintf(info, sizeof(info), "1;Port%d %s;", srv->port + 1, srv->port_desc);
 
     size_t info_len = strlen(info) + 1;
     if (info_len > AGWPE_MAX_DATA_LEN) {
@@ -1641,7 +1715,7 @@ static void handle_port_cap_req(ax25_agwpe_server_t *srv,
 
     /* Fill with plausible defaults (matches direwolf) */
     reply.data[0] = 0;      /* on_air_baud: 0 = 1200 */
-    reply.data[1] = 0xFF;   /* traffic_level: not in autoupdate mode */
+    reply.data[1] = 1;      /* traffic_level: 1 (matches direwolf server.c) */
     reply.data[2] = 0x19;   /* tx_delay (250 ms) */
     reply.data[3] = 4;      /* tx_tail */
     reply.data[4] = 0xC8;   /* persist (200) */
@@ -1765,7 +1839,7 @@ static void handle_send_unproto(ax25_agwpe_server_t *srv,
 
     ax25.type    = AX25_FRAME_UI;
     ax25.control = AX25_CTRL_UI;
-    ax25.pid     = frame->header.pid ? frame->header.pid : AX25_PID_NONE;
+    ax25.pid     = frame->header.pid;
 
     /* Source and destination from AGWPE header */
     char from_str[AGWPE_CALLSIGN_LEN + 1];
@@ -1804,7 +1878,7 @@ static void handle_send_unproto_via(ax25_agwpe_server_t *srv,
 
     ax25.type    = AX25_FRAME_UI;
     ax25.control = AX25_CTRL_UI;
-    ax25.pid     = frame->header.pid ? frame->header.pid : AX25_PID_NONE;
+    ax25.pid     = frame->header.pid;
 
     /* Source and destination */
     char from_str[AGWPE_CALLSIGN_LEN + 1];
@@ -1983,8 +2057,13 @@ static void handle_connect_via(ax25_agwpe_server_t *srv,
                                                 digipeaters,
                                                 &num_digipeaters,
                                                 &consumed);
-    if (err != ESP_OK || consumed != frame->header.data_len) {
+    if (err != ESP_OK) {
         ESP_LOGW(TAG, "Invalid 'v' connect-via path");
+        return;
+    }
+    /* Allow trailing bytes (e.g. AGWterminal sends num_digi*10+2); just ignore them */
+    if (consumed > frame->header.data_len) {
+        ESP_LOGW(TAG, "Invalid 'v' connect-via path: consumed > data_len");
         return;
     }
 
@@ -2080,7 +2159,10 @@ static void handle_disconnect(ax25_agwpe_server_t *srv,
     agwpe_get_callsign(frame->header.call_to, to_str);
 
     xSemaphoreTake(srv->mutex, portMAX_DELAY);
-    agwpe_conn_slot_t *slot = find_conn_slot(srv, from_str, to_str);
+    /* Use any-state lookup so a 'd' while the connection is still pending
+     * (SABM sent, not yet acked) correctly cancels the attempt instead of
+     * being silently dropped. */
+    agwpe_conn_slot_t *slot = find_conn_slot_any_state(srv, from_str, to_str);
     if (slot == NULL) {
         ESP_LOGW(TAG, "No connection found for 'd': %s -> %s", from_str, to_str);
         xSemaphoreGive(srv->mutex);
@@ -2107,9 +2189,13 @@ static void handle_outstanding_port(ax25_agwpe_server_t *srv,
     reply.header.data_kind = 'y';
     reply.header.data_len  = 4;
 
-    /* We don't maintain a per-port TX queue count like direwolf's tq_count,
-     * so reply with 0. */
-    memset(reply.data, 0, 4);
+    /* Report actual number of frames waiting in the TX queue so clients
+     * can apply backpressure when sending high-volume unproto traffic. */
+    uint32_t pending = (uint32_t)uxQueueMessagesWaiting(srv->tx_queue);
+    reply.data[0] = (uint8_t)(pending & 0xFF);
+    reply.data[1] = (uint8_t)((pending >> 8) & 0xFF);
+    reply.data[2] = (uint8_t)((pending >> 16) & 0xFF);
+    reply.data[3] = (uint8_t)((pending >> 24) & 0xFF);
 
     enqueue_agwpe_frame(srv, &reply);
 }
@@ -2142,6 +2228,11 @@ static void handle_outstanding_conn(ax25_agwpe_server_t *srv,
     agwpe_frame_init(&reply);
     reply.header.port      = frame->header.port;
     reply.header.data_kind = 'Y';
+    /* Normalize: call_from = own (local), call_to = remote, matching Direwolf's
+     * server_outstanding_frames_reply(own_call, remote_call) convention.
+     * find_conn_slot() matches local_call==from_str && remote_call==to_str, so
+     * when a slot is found frame->call_from IS already the local callsign.
+     * Echo the request callsigns directly; they are already in the right order. */
     memcpy(reply.header.call_from, frame->header.call_from,
            AGWPE_CALLSIGN_LEN);
     memcpy(reply.header.call_to, frame->header.call_to,
@@ -2187,13 +2278,6 @@ static void send_raw_to_client(ax25_agwpe_server_t *srv,
      * send and receive raw; the direction is implicit) */
     mb->frame.header.data_kind = 'K';
 
-    /* Prepend the TNC port byte (like direwolf) */
-    if (mb->frame.header.data_len + 1 <= AGWPE_MAX_DATA_LEN) {
-        memmove(mb->frame.data + 1, mb->frame.data, mb->frame.header.data_len);
-        mb->frame.data[0] = srv->port << 4;
-        mb->frame.header.data_len += 1;
-    }
-
     enqueue_agwpe_frame(srv, &mb->frame);
     monitor_buf_free(srv, mb);
 }
@@ -2207,8 +2291,14 @@ static void send_raw_to_client(ax25_agwpe_server_t *srv,
  *  - S/U (non-UI) → 'S'
  */
 static void send_monitor_to_client(ax25_agwpe_server_t *srv,
-                                    const ax25_frame_t *frame)
+                                    const ax25_frame_t *frame,
+                                    bool own_transmitted)
 {
+    /* 'T' frames are only emitted for own-transmitted UI frames */
+    if (own_transmitted && frame->type != AX25_FRAME_UI) {
+        return;
+    }
+
     monitor_buf_t *mb = monitor_buf_alloc(srv);
     if (mb == NULL) {
         ESP_LOGW(TAG, "Monitor pool exhausted — dropping monitor frame");
@@ -2230,7 +2320,7 @@ static void send_monitor_to_client(ax25_agwpe_server_t *srv,
     /* Determine monitor kind */
     switch (frame->type) {
         case AX25_FRAME_UI:
-            reply->header.data_kind = 'U';
+            reply->header.data_kind = own_transmitted ? 'T' : 'U';
             reply->header.pid = frame->pid;
             break;
         case AX25_FRAME_I:
@@ -2265,6 +2355,7 @@ static void send_monitor_to_client(ax25_agwpe_server_t *srv,
                 pos += snprintf(text + pos, sizeof(text) - pos, ",");
             }
             pos += snprintf(text + pos, sizeof(text) - pos, "%s", digi_str);
+            /* TNC-2/Direwolf: mark every digipeater with H-bit set with '*' */
             if (frame->digipeaters[i].has_been_repeated) {
                 pos += snprintf(text + pos, sizeof(text) - pos, "*");
             }
@@ -2273,18 +2364,20 @@ static void send_monitor_to_client(ax25_agwpe_server_t *srv,
     }
 
     /* Frame type description */
+    int pf = (frame->control & AX25_CTRL_PF_BIT) ? 1 : 0;
+    const char *pf_label = frame->is_command ? "P" : "F";
     switch (frame->type) {
         case AX25_FRAME_UI:
             pos += snprintf(text + pos, sizeof(text) - pos,
-                            "<UI pid=%02X Len=%zu >",
-                            frame->pid, frame->payload_len);
+                            "<UI pid=%02X Len=%d %s=%d >",
+                            frame->pid, (int)frame->payload_len, pf_label, pf);
             break;
         case AX25_FRAME_I:
             pos += snprintf(text + pos, sizeof(text) - pos,
-                            "<I S%d R%d pid=%02X Len=%zu >",
+                            "<I S%d R%d pid=%02X Len=%d %s=%d >",
                             ax25_frame_extract_ns(frame->control),
                             ax25_frame_extract_nr(frame->control),
-                            frame->pid, frame->payload_len);
+                            frame->pid, (int)frame->payload_len, pf_label, pf);
             break;
         case AX25_FRAME_S: {
             uint8_t stype = frame->control & 0x0F;
@@ -2293,22 +2386,41 @@ static void send_monitor_to_client(ax25_agwpe_server_t *srv,
                 case 0x01: sname = "RR"; break;
                 case 0x05: sname = "RNR"; break;
                 case 0x09: sname = "REJ"; break;
+                case 0x0D: sname = "SREJ"; break;
             }
-            pos += snprintf(text + pos, sizeof(text) - pos,
-                            "<%s R%d >", sname,
-                            ax25_frame_extract_nr(frame->control));
+            if (stype == 0x0D) {
+                /* SREJ may carry a selective-reject list (info field) */
+                pos += snprintf(text + pos, sizeof(text) - pos,
+                                "<%s R%d %s=%d Len=%d >", sname,
+                                ax25_frame_extract_nr(frame->control), pf_label, pf,
+                                (int)frame->payload_len);
+            } else {
+                pos += snprintf(text + pos, sizeof(text) - pos,
+                                "<%s R%d %s=%d >", sname,
+                                ax25_frame_extract_nr(frame->control), pf_label, pf);
+            }
             break;
         }
         case AX25_FRAME_U: {
             uint8_t utype = frame->control & 0xEF;  /* mask out P/F */
             const char *uname = "U";
-            if (utype == (AX25_CTRL_SABM & 0xEF)) uname = "SABM";
-            else if (utype == (AX25_CTRL_DISC & 0xEF)) uname = "DISC";
-            else if (utype == (AX25_CTRL_DM & 0xEF)) uname = "DM";
-            else if (utype == (AX25_CTRL_UA & 0xEF)) uname = "UA";
-            else if (utype == (AX25_CTRL_FRMR & 0xEF)) uname = "FRMR";
-            pos += snprintf(text + pos, sizeof(text) - pos,
-                            "<%s >", uname);
+            if      (utype == (AX25_CTRL_SABM  & 0xEF)) uname = "SABM";
+            else if (utype == 0x6Fu)                    uname = "SABME";  /* 0x6F/0x7F */
+            else if (utype == (AX25_CTRL_DISC  & 0xEF)) uname = "DISC";
+            else if (utype == (AX25_CTRL_DM    & 0xEF)) uname = "DM";
+            else if (utype == (AX25_CTRL_UA    & 0xEF)) uname = "UA";
+            else if (utype == (AX25_CTRL_FRMR  & 0xEF)) uname = "FRMR";
+            else if (utype == 0xAFu)                    uname = "XID";    /* 0xAF/0xBF */
+            else if (utype == 0xE3u)                    uname = "TEST";   /* 0xE3/0xF3 */
+            /* XID and TEST can carry an info field; include Len= to match direwolf */
+            if (utype == 0xAFu || utype == 0xE3u) {
+                pos += snprintf(text + pos, sizeof(text) - pos,
+                                "<%s %s=%d Len=%d >", uname, pf_label, pf,
+                                (int)frame->payload_len);
+            } else {
+                pos += snprintf(text + pos, sizeof(text) - pos,
+                                "<%s %s=%d >", uname, pf_label, pf);
+            }
             break;
         }
         default:
@@ -2343,6 +2455,30 @@ static void send_monitor_to_client(ax25_agwpe_server_t *srv,
 
     enqueue_agwpe_frame(srv, reply);
     monitor_buf_free(srv, mb);
+}
+
+/* ---- 'H' Heard stations ---- */
+
+/**
+ * @brief Send 20 'H' frames in response to a heard-stations query.
+ *
+ * The AGWPE spec requires exactly 20 response frames (with empty entries
+ * padding out any unused slots).  We have no heard-station database on
+ * the ESP32, so all 20 frames are sent empty.  This unblocks client parsers
+ * that wait for the full 20-frame response before proceeding.
+ */
+static void handle_heard_stations(ax25_agwpe_server_t *srv,
+                                   const agwpe_frame_t *frame)
+{
+    agwpe_frame_t reply;
+    for (int i = 0; i < 20; i++) {
+        agwpe_frame_init(&reply);
+        reply.header.port      = frame->header.port;
+        reply.header.data_kind = 'H';
+        /* call_from and call_to remain zeroed — empty entry */
+        reply.header.data_len  = 0;
+        enqueue_agwpe_frame(srv, &reply);
+    }
 }
 
 /**

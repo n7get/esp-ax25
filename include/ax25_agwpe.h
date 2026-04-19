@@ -106,8 +106,10 @@ typedef enum {
     AGWPE_KIND_RECV_SUPERVISORY = 'S',
     /** 'I' - Received monitored I-frame */
     AGWPE_KIND_RECV_I_FRAME     = 'I',
-    /** 'T' - Received raw AX.25 frame */
-    AGWPE_KIND_RECV_RAW         = 'T',
+    /** 'K' - Received raw AX.25 frame (direwolf/AGWPE) */
+    AGWPE_KIND_RECV_RAW         = 'K',
+    /** 'T' - Own transmitted frame (monitor text, not raw) */
+    AGWPE_KIND_OWN_TRANSMITTED  = 'T',
     /** 'K' - Send raw AX.25 frame */
     AGWPE_KIND_SEND_RAW         = 'K',
     /** 'k' - Enable raw frame reception */
@@ -158,8 +160,8 @@ typedef struct {
  * @brief AGWPE version information
  */
 typedef struct {
-    uint16_t major;     /**< Major version number */
-    uint16_t minor;     /**< Minor version number (reserved, typically 0) */
+    uint32_t major;     /**< Major version number (4 bytes for Direwolf compat) */
+    uint32_t minor;     /**< Minor version number (4 bytes for Direwolf compat) */
 } agwpe_version_t;
 
 /**
@@ -211,6 +213,7 @@ typedef struct {
     agwpe_decoder_state_t state;            /**< Current decoder state */
     agwpe_frame_t         frame;            /**< Frame being assembled */
     size_t                bytes_received;   /**< Bytes received for current part */
+    uint32_t              data_len_wire;    /**< Full wire data length (may exceed buffer) */
     agwpe_frame_cb_t      callback;         /**< Frame callback */
     void                 *user_data;        /**< User context */
 } agwpe_decoder_t;

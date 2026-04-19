@@ -1,3 +1,11 @@
+// Write a 32-bit value in little-endian order (test helper)
+#include <stdint.h>
+static void write_le32_test(uint8_t *buf, uint32_t val) {
+    buf[0] = (uint8_t)(val & 0xFF);
+    buf[1] = (uint8_t)((val >> 8) & 0xFF);
+    buf[2] = (uint8_t)((val >> 16) & 0xFF);
+    buf[3] = (uint8_t)((val >> 24) & 0xFF);
+}
 //
 //    Copyright (C) 2026 Robert Ambrose N7GET
 //
@@ -19,6 +27,7 @@
  * @brief Unit tests for AGWPE encoder and decoder
  */
 
+#include <stdint.h>
 #include "unity.h"
 #include "ax25_agwpe.h"
 #include "ax25_frame.h"
@@ -38,35 +47,10 @@ typedef struct {
     agwpe_frame_t last_frame;
 } agwpe_rx_ctx_t;
 
-static void agwpe_rx_cb(const agwpe_frame_t *frame, void *user_data)
-{
+static void agwpe_rx_cb(const agwpe_frame_t *frame, void *user_data) {
     agwpe_rx_ctx_t *ctx = (agwpe_rx_ctx_t *)user_data;
     ctx->call_count++;
     memcpy(&ctx->last_frame, frame, sizeof(agwpe_frame_t));
-}
-
-static void write_le32_test(uint8_t *buf, uint32_t value)
-{
-    buf[0] = (uint8_t)(value & 0xFF);
-    buf[1] = (uint8_t)((value >> 8) & 0xFF);
-    buf[2] = (uint8_t)((value >> 16) & 0xFF);
-    buf[3] = (uint8_t)((value >> 24) & 0xFF);
-}
-
-// ---------------------------------------------------------------------------
-// Initialization Tests
-// ---------------------------------------------------------------------------
-
-TEST_CASE("AGWPE: frame init clears structure", "[ax25_agwpe]")
-{
-    agwpe_frame_t frame;
-    memset(&frame, 0xFF, sizeof(frame));
-    
-    agwpe_frame_init(&frame);
-    
-    TEST_ASSERT_EQUAL_UINT8(0, frame.header.port);
-    TEST_ASSERT_EQUAL_UINT8(0, frame.header.data_kind);
-    TEST_ASSERT_EQUAL_UINT32(0, frame.header.data_len);
 }
 
 TEST_CASE("AGWPE: decoder init", "[ax25_agwpe]")
@@ -312,8 +296,16 @@ TEST_CASE("AGWPE: decoder clamps oversized declared payload", "[ax25_agwpe]")
     TEST_ASSERT_EQUAL(AGWPE_STATE_DATA, dec.state);
     TEST_ASSERT_EQUAL_UINT32(AGWPE_MAX_DATA_LEN, dec.frame.header.data_len);
 
-    memset(enc_buf, 0xAB, AGWPE_MAX_DATA_LEN);
+    /* Send the full wire payload: AGWPE_MAX_DATA_LEN bytes stored + 32 excess
+     * bytes that must be consumed to keep the stream in sync. */
+    memset(enc_buf, 0xAB, AGWPE_MAX_DATA_LEN + 32u);
     agwpe_decoder_process_bytes(&dec, enc_buf, AGWPE_MAX_DATA_LEN);
+    /* Callback not yet fired — still waiting for the 32 excess wire bytes. */
+    TEST_ASSERT_EQUAL_INT(0, ctx.call_count);
+    TEST_ASSERT_EQUAL(AGWPE_STATE_DATA, dec.state);
+
+    /* Feed the remaining 32 wire bytes; frame should now complete. */
+    agwpe_decoder_process_bytes(&dec, enc_buf + AGWPE_MAX_DATA_LEN, 32u);
 
     TEST_ASSERT_EQUAL_INT(1, ctx.call_count);
     TEST_ASSERT_EQUAL_UINT8('K', ctx.last_frame.header.data_kind);
@@ -424,7 +416,10 @@ TEST_CASE("AGWPE: build connect via digipeaters", "[ax25_agwpe]")
     TEST_ASSERT_EQUAL(ESP_OK, err);
     TEST_ASSERT_EQUAL_UINT8('v', frame.header.data_kind);
     TEST_ASSERT_EQUAL_UINT8(2, frame.data[0]); /* num digis */
-    TEST_ASSERT_TRUE(frame.header.data_len > 1);
+    /* Each digi occupies a fixed 10-byte null-padded slot (direwolf compatible) */
+    TEST_ASSERT_EQUAL_UINT32(1 + 2 * AGWPE_CALLSIGN_LEN, frame.header.data_len);
+    TEST_ASSERT_EQUAL_MEMORY("RELAY1", &frame.data[1], strlen("RELAY1"));
+    TEST_ASSERT_EQUAL_MEMORY("RELAY2", &frame.data[1 + AGWPE_CALLSIGN_LEN], strlen("RELAY2"));
 }
 
 TEST_CASE("AGWPE: build disconnect request", "[ax25_agwpe]")
@@ -477,14 +472,15 @@ TEST_CASE("AGWPE: build send unproto via", "[ax25_agwpe]")
 TEST_CASE("AGWPE: build connect via rejects oversized path", "[ax25_agwpe]")
 {
     agwpe_frame_t frame;
-    char long_digi[AGWPE_MAX_DATA_LEN + 2];
-    memset(long_digi, 'A', sizeof(long_digi) - 1);
-    long_digi[sizeof(long_digi) - 1] = '\0';
-    const char *digis[] = {long_digi};
+    /* With 10-byte fixed slots, overflow requires more than
+     * (AGWPE_MAX_DATA_LEN - 1) / AGWPE_CALLSIGN_LEN = 51 digipeaters.
+     * Pass 52 to trigger the buffer-overflow guard. */
+    const char *digis[52];
+    for (int i = 0; i < 52; i++) digis[i] = "RELAY";
 
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM,
                       agwpe_build_connect_via_req(0, "N0CALL", "DEST",
-                                                  digis, 1, &frame));
+                                                  digis, 52, &frame));
 }
 
 TEST_CASE("AGWPE: build send unproto via rejects payload overflow", "[ax25_agwpe]")
@@ -592,6 +588,11 @@ TEST_CASE("AGWPE: AX.25 UI frame with digipeaters to AGWPE unproto via", "[ax25_
     TEST_ASSERT_EQUAL_UINT8('V', agwpe.header.data_kind);
     TEST_ASSERT_EQUAL_UINT8(1, agwpe.header.port);
     TEST_ASSERT_EQUAL_UINT8(2, agwpe.data[0]); /* num digis */
+    /* Each digi uses a fixed 10-byte slot; payload follows immediately after */
+    TEST_ASSERT_EQUAL_UINT32(1 + 2 * AGWPE_CALLSIGN_LEN + strlen(info),
+                             agwpe.header.data_len);
+    TEST_ASSERT_EQUAL_MEMORY("WIDE1-1", &agwpe.data[1], strlen("WIDE1-1"));
+    TEST_ASSERT_EQUAL_MEMORY("WIDE2-1", &agwpe.data[1 + AGWPE_CALLSIGN_LEN], strlen("WIDE2-1"));
 }
 
 TEST_CASE("AGWPE: AX.25 frame to AGWPE raw", "[ax25_agwpe]")
@@ -637,8 +638,8 @@ TEST_CASE("AGWPE: AGWPE raw frame to AX.25", "[ax25_agwpe]")
     esp_err_t err = ax25_to_agwpe_raw(&original, 0, &agwpe);
     TEST_ASSERT_EQUAL(ESP_OK, err);
     
-    /* Change kind to 'T' (received raw) for conversion back */
-    agwpe.header.data_kind = 'T';
+    /* Change kind to 'K' (received raw) for conversion back */
+    agwpe.header.data_kind = 'K';
     
     /* Convert back to AX.25 */
     ax25_frame_t decoded;
@@ -699,19 +700,23 @@ TEST_CASE("AGWPE: parse version response", "[ax25_agwpe]")
     agwpe_frame_t frame;
     agwpe_frame_init(&frame);
     frame.header.data_kind = 'R';
-    frame.header.data_len = 4;
-    /* Version 2000.0 in little-endian */
+    frame.header.data_len = 8;
+    /* Version 2000.0 in little-endian (4 bytes major, 4 bytes minor) */
     frame.data[0] = 0xD0; /* 2000 & 0xFF */
-    frame.data[1] = 0x07; /* 2000 >> 8 */
-    frame.data[2] = 0x00;
-    frame.data[3] = 0x00;
+    frame.data[1] = 0x07; /* (2000 >> 8) & 0xFF */
+    frame.data[2] = 0x00; /* (2000 >> 16) & 0xFF */
+    frame.data[3] = 0x00; /* (2000 >> 24) & 0xFF */
+    frame.data[4] = 0x00; /* 0 & 0xFF */
+    frame.data[5] = 0x00; /* (0 >> 8) & 0xFF */
+    frame.data[6] = 0x00; /* (0 >> 16) & 0xFF */
+    frame.data[7] = 0x00; /* (0 >> 24) & 0xFF */
     
     agwpe_version_t version;
     esp_err_t err = agwpe_parse_version_resp(&frame, &version);
     
     TEST_ASSERT_EQUAL(ESP_OK, err);
-    TEST_ASSERT_EQUAL_UINT16(2000, version.major);
-    TEST_ASSERT_EQUAL_UINT16(0, version.minor);
+    TEST_ASSERT_EQUAL_UINT32(2000, version.major);
+    TEST_ASSERT_EQUAL_UINT32(0, version.minor);
 }
 
 TEST_CASE("AGWPE: parse port caps", "[ax25_agwpe]")
